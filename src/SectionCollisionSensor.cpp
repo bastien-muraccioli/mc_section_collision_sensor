@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 CNRS-UM LIRMM, CNRS-AIST JRL
+ * Copyright 2026 CNRS-UM LIRMM, CNRS-AIST JRL
  */
 
 #include "SectionCollisionSensor.h"
@@ -23,6 +23,57 @@ int SectionCollisionSensor::voltageToSegment(double voltage) noexcept
     if(voltage < SEGMENT_THRESHOLDS[i]) { return i; }
   }
   return 6;
+}
+
+std::string SectionCollisionSensor::segmentName(int segment)
+{
+  switch(segment)
+  {
+    case 0: return "No contact";
+    case 6: return "End effector / tool";
+    default: return "Link " + std::to_string(segment + 1); // 1 → link 2 … 5 → link 6
+  }
+}
+
+void SectionCollisionSensor::updateCollisionCounters()
+{
+  // Segment 0 means "no contact" and is never counted.
+  for(int s = 1; s < NUM_SEGMENTS; ++s)
+  {
+    const bool active = (contact_segment_ == s);
+
+    // Rising edge on this section (and not already latched) → new collision
+    if(active && !collision_timer_active_[s])
+    {
+      collision_counter_[s]++;
+      collision_timer_active_[s] = true;
+      collision_timer_[s] = 0.0;
+      if(activate_verbose_)
+      {
+        mc_rtc::log::info("[SectionCollisionSensor] collision on {} (count = {})",
+                          segmentName(s), collision_counter_[s]);
+      }
+    }
+
+    // Debounce: re-arm only once the section has been released for long enough
+    if(collision_timer_active_[s])
+    {
+      collision_timer_[s] += dt_;
+      if(!active && collision_timer_[s] > COLLISION_DEBOUNCE_)
+      {
+        collision_timer_active_[s] = false;
+        collision_timer_[s] = 0.0;
+      }
+    }
+  }
+}
+
+void SectionCollisionSensor::resetCollisionCounters()
+{
+  collision_counter_.fill(0);
+  collision_timer_active_.fill(false);
+  collision_timer_.fill(0.0);
+  mc_rtc::log::info("[SectionCollisionSensor] collision counters reset");
 }
 
 SectionCollisionSensor::~SectionCollisionSensor() = default;
@@ -105,23 +156,8 @@ void SectionCollisionSensor::before(mc_control::MCGlobalController & controller)
     prev_contact_segment_ = contact_segment_;
   }
 
-  bool obstacle_detected = contact_segment_ > 0;
-
-  if(obstacle_detected && !collision_timer_active)
-  {
-    collision_counter++;
-    collision_timer_active = true;
-  }
-
-  if(collision_timer_active)
-  {
-    collision_timer += dt_;
-    if(!obstacle_detected && collision_timer > 0.5)
-    {
-      collision_timer_active = false;
-      collision_timer = 0.0;
-    }
-  }
+  // ── 4b. Per-section collision counters ──────────────────────────────────
+  updateCollisionCounters();
 
   // ── 5. Datastore ─────────────────────────────────────────────────────────
   if(collision_stop_activated_)
@@ -178,11 +214,28 @@ void SectionCollisionSensor::addGui(mc_control::MCGlobalController & controller)
       [this]() { return std::to_string(contact_segment_); }),
     mc_rtc::gui::Label("obstacle detected",
       [this]() { return (contact_segment_ > 0) ? std::string("YES") : std::string("no"); }),
-    mc_rtc::gui::Label("Collision counter", collision_counter),
-    mc_rtc::gui::Button("Reset counter", [this]() { return reset_collision_counter = true; }),
+    mc_rtc::gui::Label("Contact section",
+      [this]() { return segmentName(contact_segment_); }),
     mc_rtc::gui::Checkbox("Collision stop", collision_stop_activated_),
     mc_rtc::gui::Checkbox("Verbose", activate_verbose_)
   );
+
+  // ── Per-section collision counters ──────────────────────────────────────
+  const std::vector<std::string> counter_category = {"Plugins", "SectionCollisionSensor", "Collision counters"};
+  for(int s = 1; s < NUM_SEGMENTS; ++s)
+  {
+    ctl.controller().gui()->addElement(
+      counter_category,
+      mc_rtc::gui::Label(segmentName(s), [this, s]() { return collision_counter_[s]; }));
+  }
+  ctl.controller().gui()->addElement(
+    counter_category,
+    mc_rtc::gui::Label("Total", [this]() {
+      int total = 0;
+      for(int s = 1; s < NUM_SEGMENTS; ++s) { total += collision_counter_[s]; }
+      return total;
+    }),
+    mc_rtc::gui::Button("Reset counters", [this]() { resetCollisionCounters(); }));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -199,6 +252,11 @@ void SectionCollisionSensor::addLog(mc_control::MCGlobalController & controller)
                      [this]() { return contact_segment_ > 0; });
   logger.addLogEntry("SectionCollisionSensor_threshold_filtering",
                      [this]() { return threshold_filtering_; });
+  for(int s = 1; s < NUM_SEGMENTS; ++s)
+  {
+    logger.addLogEntry("SectionCollisionSensor_collision_counter_segment" + std::to_string(s),
+                       [this, s]() { return collision_counter_[s]; });
+  }
 }
 
 } // namespace mc_plugin

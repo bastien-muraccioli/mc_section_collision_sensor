@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 CNRS-UM LIRMM, CNRS-AIST JRL
+ * Copyright 2026 CNRS-UM LIRMM, CNRS-AIST JRL
  */
 
 #pragma once
@@ -7,6 +7,9 @@
 #include "ROS2Subscriber.h"
 
 #include <mc_control/GlobalPlugin.h>
+
+#include <array>
+#include <string>
 
 namespace mc_plugin
 {
@@ -81,10 +84,17 @@ private:
   int  prev_contact_segment_ = 0; ///< previous cycle's segment (for edge logging)
   bool collision_stop_activated_ = false;
 
-  int collision_counter = 0;
-  bool reset_collision_counter = false;
-  bool collision_timer_active = false;
-  double collision_timer = 0.0;
+  // ── Per-section collision counters ───────────────────────────────────────
+  // Index = segment id (0 unused = no contact, 1..5 = link 2..6, 6 = end effector/tool)
+  static constexpr int NUM_SEGMENTS = 7;
+  static constexpr double COLLISION_DEBOUNCE_ = 0.5; ///< [s] min time before re-counting same section
+  std::array<int, NUM_SEGMENTS>    collision_counter_{};
+  std::array<bool, NUM_SEGMENTS>   collision_timer_active_{};
+  std::array<double, NUM_SEGMENTS> collision_timer_{};
+
+  static std::string segmentName(int segment);
+  void updateCollisionCounters();
+  void resetCollisionCounters();
 };
 
 } // namespace mc_plugin
