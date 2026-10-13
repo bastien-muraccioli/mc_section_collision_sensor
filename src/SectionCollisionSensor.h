@@ -62,6 +62,7 @@ private:
   // ── Config ───────────────────────────────────────────────────────────────
   bool activate_verbose_    = true;
   double threshold_filtering_ = 0.05; ///< IIR LPF coefficient (0–1); 1.0 = no filtering
+  double dt_;
 
   // ── ROS 2 ────────────────────────────────────────────────────────────────
   std::shared_ptr<rclcpp::Node> node_;
@@ -79,6 +80,11 @@ private:
   int  contact_segment_      = 0; ///< current segment 0–6
   int  prev_contact_segment_ = 0; ///< previous cycle's segment (for edge logging)
   bool collision_stop_activated_ = false;
+
+  int collision_counter = 0;
+  bool reset_collision_counter = false;
+  bool collision_timer_active = false;
+  double collision_timer = 0.0;
 };
 
 } // namespace mc_plugin

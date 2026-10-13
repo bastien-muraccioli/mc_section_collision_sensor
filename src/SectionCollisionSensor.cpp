@@ -62,6 +62,7 @@ void SectionCollisionSensor::init(mc_control::MCGlobalController & controller,
 
   voltage_sub_.subscribe(node_, voltage_topic);
   voltage_sub_.maxTime(ctl.timestep());
+  dt_ = ctl.timestep();
 
   addGui(ctl);
   addLog(ctl);
@@ -102,6 +103,24 @@ void SectionCollisionSensor::before(mc_control::MCGlobalController & controller)
         prev_contact_segment_, contact_segment_, voltage_in_, v_filtered_);
     }
     prev_contact_segment_ = contact_segment_;
+  }
+
+  bool obstacle_detected = contact_segment_ > 0;
+
+  if(obstacle_detected && !collision_timer_active)
+  {
+    collision_counter++;
+    collision_timer_active = true;
+  }
+
+  if(collision_timer_active)
+  {
+    collision_timer += dt_;
+    if(!obstacle_detected && collision_timer > 0.5)
+    {
+      collision_timer_active = false;
+      collision_timer = 0.0;
+    }
   }
 
   // ── 5. Datastore ─────────────────────────────────────────────────────────
@@ -159,6 +178,8 @@ void SectionCollisionSensor::addGui(mc_control::MCGlobalController & controller)
       [this]() { return std::to_string(contact_segment_); }),
     mc_rtc::gui::Label("obstacle detected",
       [this]() { return (contact_segment_ > 0) ? std::string("YES") : std::string("no"); }),
+    mc_rtc::gui::Label("Collision counter", collision_counter),
+    mc_rtc::gui::Button("Reset counter", [this]() { return reset_collision_counter = true; }),
     mc_rtc::gui::Checkbox("Collision stop", collision_stop_activated_),
     mc_rtc::gui::Checkbox("Verbose", activate_verbose_)
   );
